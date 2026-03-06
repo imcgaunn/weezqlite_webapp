@@ -47,7 +47,7 @@
         {% if db_path %}
           <li><a href="/db/tables?db_path={{ db_path | urlencode }}">Tables</a></li>
           <li><a href="/db/query?db_path={{ db_path | urlencode }}">Query</a></li>
-          <li><span class="db-label">{{ db_path }}</span></li>
+          <li><span class="db-label">{{ basename(db_path) }}</span></li>
         {% endif %}
         <li><a href="/">Change DB</a></li>
       </ul>

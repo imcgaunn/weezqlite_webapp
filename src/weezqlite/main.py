@@ -16,6 +16,7 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 # Module-level templates instance shared by route modules
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+templates.env.globals["basename"] = lambda p: Path(p).name if p else ""
 
 
 def create_app() -> FastAPI:

@@ -3,7 +3,7 @@
 {% block content %}
 <hgroup>
   <h1>Open a SQLite3 Database</h1>
-  <p>Enter the server-accessible path to a <code>.db</code> file.</p>
+  <p>Upload a <code>.db</code> file from your computer to start browsing.</p>
 </hgroup>
 
 {% if error %}
@@ -13,12 +13,9 @@
 {% endif %}
 
 <article>
-  <form method="post" action="/db">
-    <label for="db_path">Database file path</label>
-    <input type="text" id="db_path" name="db_path"
-           placeholder="/path/to/your/database.db"
-           value="{{ db_path or '' }}"
-           autocomplete="off" spellcheck="false">
+  <form method="post" action="/db" enctype="multipart/form-data">
+    <label for="db_file">SQLite3 database file</label>
+    <input type="file" id="db_file" name="db_file" accept=".db,.sqlite,.sqlite3">
     <button type="submit">Open Database</button>
   </form>
 </article>
