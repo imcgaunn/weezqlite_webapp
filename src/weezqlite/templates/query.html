@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}weezqlite — Query{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>SQL Query</h1>
+  <p>Run a read-only <code>SELECT</code> query against the database.</p>
+</hgroup>
+
+{% if error %}
+<article aria-label="Error" style="border-left:4px solid var(--pico-color-red-500);">
+  <p><strong>Error:</strong> {{ error }}</p>
+</article>
+{% endif %}
+
+<article>
+  <form method="post" action="/db/query?db_path={{ db_path | urlencode }}">
+    <label for="sql">SQL</label>
+    <textarea id="sql" name="sql" rows="6" placeholder="SELECT * FROM …">{{ sql or '' }}</textarea>
+    <button type="submit">Run Query</button>
+  </form>
+</article>
+
+{% if result is not none %}
+  {% if result.rows %}
+  <p><small>{{ result.rows | length }} row{% if result.rows | length != 1 %}s{% endif %} returned</small></p>
+  <figure>
+    <table>
+      <thead>
+        <tr>{% for col in result.columns %}<th>{{ col }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in result.rows %}
+        <tr>
+          {% for cell in row %}
+          <td>
+            {% if cell is none %}<span class="null-val">NULL</span>
+            {% else %}{{ cell }}{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </figure>
+  {% else %}
+  <p>0 rows returned.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}

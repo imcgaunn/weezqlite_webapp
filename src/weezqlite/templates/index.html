@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}weezqlite — Open Database{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>Open a SQLite3 Database</h1>
+  <p>Enter the server-accessible path to a <code>.db</code> file.</p>
+</hgroup>
+
+{% if error %}
+<article aria-label="Error" style="border-left: 4px solid var(--pico-color-red-500);">
+  <p>{{ error }}</p>
+</article>
+{% endif %}
+
+<article>
+  <form method="post" action="/db">
+    <label for="db_path">Database file path</label>
+    <input type="text" id="db_path" name="db_path"
+           placeholder="/path/to/your/database.db"
+           value="{{ db_path or '' }}"
+           autocomplete="off" spellcheck="false">
+    <button type="submit">Open Database</button>
+  </form>
+</article>
+{% endblock %}

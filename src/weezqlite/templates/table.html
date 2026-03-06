@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}weezqlite — {{ table_name }}{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>{{ table_name }}</h1>
+  <p>{{ total }} row{% if total != 1 %}s{% endif %}</p>
+</hgroup>
+
+<details>
+  <summary><strong>Schema</strong></summary>
+  <figure>
+    <table>
+      <thead>
+        <tr><th>Column</th><th>Type</th><th>Attributes</th></tr>
+      </thead>
+      <tbody>
+        {% for col in schema %}
+        <tr>
+          <td>{{ col.name }}</td>
+          <td><span class="badge badge-type">{{ col.type }}</span></td>
+          <td>
+            {% if col.pk %}<span class="badge badge-pk">PK</span>{% endif %}
+            {% if not col.nullable %}<small>NOT NULL</small>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </figure>
+</details>
+
+<h2>Data</h2>
+{% if rows %}
+<figure>
+  <table>
+    <thead>
+      <tr>
+        {% for col in columns %}<th>{{ col }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        {% for cell in row %}
+        <td>
+          {% if cell is none %}<span class="null-val">NULL</span>
+          {% else %}{{ cell }}{% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</figure>
+{% else %}
+<p>No rows on this page.</p>
+{% endif %}
+
+{# Pagination controls #}
+<nav aria-label="Pagination" style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+  {% if page > 1 %}
+  <a href="/db/tables/{{ table_name }}?db_path={{ db_path | urlencode }}&page={{ page - 1 }}&page_size={{ page_size }}"
+     role="button" class="outline secondary">← Previous</a>
+  {% else %}
+  <button disabled class="outline secondary">← Previous</button>
+  {% endif %}
+
+  <span>Page {{ page }} of {{ total_pages }} &nbsp;·&nbsp; {{ page_size }} rows/page</span>
+
+  {% if page < total_pages %}
+  <a href="/db/tables/{{ table_name }}?db_path={{ db_path | urlencode }}&page={{ page + 1 }}&page_size={{ page_size }}"
+     role="button" class="outline secondary">Next →</a>
+  {% else %}
+  <button disabled class="outline secondary">Next →</button>
+  {% endif %}
+</nav>
+{% endblock %}

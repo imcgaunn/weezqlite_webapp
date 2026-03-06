@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}weezqlite — Tables{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>Tables</h1>
+  <p>{{ tables | length }} table{% if tables | length != 1 %}s{% endif %} in this database</p>
+</hgroup>
+
+{% if tables %}
+<figure>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Rows</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tables %}
+      <tr>
+        <td><strong>{{ t.name }}</strong></td>
+        <td>{{ t.row_count }}</td>
+        <td>
+          <a href="/db/tables/{{ t.name }}?db_path={{ db_path | urlencode }}"
+             role="button" class="outline" style="padding:0.3rem 0.75rem;font-size:0.85rem;">
+            Browse
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</figure>
+{% else %}
+<p>No tables found in this database.</p>
+{% endif %}
+{% endblock %}

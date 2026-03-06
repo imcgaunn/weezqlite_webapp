@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}weezqlite{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    /* Pico uses <header> for nav — we override the top container width */
+    body > header { background: var(--pico-color-indigo-950); }
+    body > header nav { max-width: 1200px; margin: 0 auto; }
+    body > header nav a, body > header nav strong { color: var(--pico-color-indigo-100); }
+    body > header nav .db-label {
+      font-size: 0.75rem;
+      color: var(--pico-color-indigo-300);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 40ch;
+      margin-left: auto;
+    }
+    main { max-width: 1200px; margin: 0 auto; }
+    /* Constrain wide cell content in data tables */
+    tbody td { word-break: break-word; max-width: 35ch; }
+    /* Small utility badges */
+    .badge {
+      display: inline-block;
+      padding: 0.1em 0.45em;
+      border-radius: 3px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      vertical-align: middle;
+    }
+    .badge-pk  { background: var(--pico-color-blue-100);  color: var(--pico-color-blue-700); }
+    .badge-type { background: var(--pico-color-zinc-100); color: var(--pico-color-zinc-600); }
+    .null-val { color: var(--pico-muted-color); font-style: italic; }
+    textarea { font-family: var(--pico-font-family-monospace) !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <ul>
+        <li><strong>weezqlite</strong></li>
+      </ul>
+      <ul>
+        {% if db_path %}
+          <li><a href="/db/tables?db_path={{ db_path | urlencode }}">Tables</a></li>
+          <li><a href="/db/query?db_path={{ db_path | urlencode }}">Query</a></li>
+          <li><span class="db-label">{{ db_path }}</span></li>
+        {% endif %}
+        <li><a href="/">Change DB</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
