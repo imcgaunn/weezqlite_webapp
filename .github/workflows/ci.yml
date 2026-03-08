@@ -6,7 +6,7 @@ on:
     branches: [master]
 
 jobs:
-  test:
+  unit:
     name: Vitest unit tests
     runs-on: ubuntu-latest
 
@@ -23,6 +23,40 @@ jobs:
         run: npm ci
         working-directory: client
 
-      - name: Run tests
+      - name: Run unit tests
         run: npm test
         working-directory: client
+
+  e2e:
+    name: Playwright e2e tests
+    runs-on: ubuntu-latest
+    needs: unit
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: client
+
+      - name: Run e2e tests
+        run: npm run test:e2e
+        working-directory: client
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: client/playwright-report/
+          retention-days: 7
