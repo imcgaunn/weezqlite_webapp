@@ -7,21 +7,21 @@ for the weezqlite sqlite3 database viewer webapp.
 
 ## Project Overview
 
-A simple web application for exploring a sqlite3 database file. Users provide a
-database file path, then browse tables, inspect schemas, view paginated data, and
-run custom SQL queries.
+A client-side single-page application for exploring a SQLite3 database file.
+The database runs entirely in the browser via sql.js (WASM) — no server required.
+Users upload a `.db` file (or load one from Azure Blob Storage), then browse
+tables, inspect schemas, view paginated data, sort columns, and run custom SQL queries.
 
 ## Stack
 
 | Component | Choice |
 |---|---|
-| Runtime | Python 3.13+ |
-| Package manager | uv |
-| Web framework | FastAPI |
-| Database access | aiosqlite |
-| Templating | Jinja2 |
-| Logging | structlog |
-| Testing | pytest + pytest-asyncio + httpx |
+| Runtime | Browser (no server) |
+| SQLite engine | sql.js 1.12 (WASM, CDN) |
+| Styling | PicoCSS v2 (CDN) |
+| Auth (Azure) | MSAL.js v3 (CDN) |
+| Testing | Vitest + Playwright |
+| Package manager | npm (client/ only) |
 
 ## Development Methodology: TDD
 
@@ -37,59 +37,49 @@ Do not write implementation code without a corresponding test first.
 ## Project Layout
 
 ```
-src/weezqlite/       # application source (src layout)
-tests/               # pytest tests
-docs/                # documentation (STACK.md, PLAN.md)
+client/              # SPA source and tests
+  app.js             # all application logic (db helpers, router, renderers, bootstrap)
+  config.js          # Azure config (not checked in — copy from config.example.js)
+  index.html         # shell HTML + inline CSS
+  tests/             # Vitest unit tests + Playwright e2e
+docs/                # historical documentation (STACK.md, PLAN.md)
 ```
-
-Full structure is documented in `docs/PLAN.md`.
 
 ## Key Architectural Decisions
 
-- **Async throughout**: All database operations use aiosqlite; all FastAPI route
-  handlers are async.
-- **No ORM**: Direct SQL via aiosqlite — simple and transparent.
-- **Read-only query enforcement**: Custom query execution (`/db/query`) must reject
-  any SQL that is not a SELECT statement. This is enforced in `database.py`, not
-  just the route handler.
-- **No authentication**: v1 is intended for local/trusted use only.
-- **File path as primary input**: The user provides a server-accessible file path.
-  File upload is a stretch goal.
-- **Pagination default**: 50 rows per page for table data views.
-- **src layout**: Source lives under `src/weezqlite/` to keep it separate from
-  tests and config.
-- **PicoCSS for styling**: Templates use PicoCSS v2 (CDN) for responsive design
-  and semantic HTML styling. Custom CSS is kept to a minimum (badges, null value
-  display, nav tweaks). No hand-rolled responsive layout.
-
-## Implementation Order
-
-Always follow this sequence (each step is test-first):
-
-1. `pyproject.toml` — project and dependency setup
-2. `tests/conftest.py` — shared fixtures
-3. Database layer: `tests/test_database.py` then `src/weezqlite/database.py`
-4. Home route: `tests/test_routes_home.py` then `src/weezqlite/routes/home.py`
-5. Tables routes: `tests/test_routes_tables.py` then `src/weezqlite/routes/tables.py`
-6. Query route: `tests/test_routes_query.py` then `src/weezqlite/routes/query.py`
-7. App wiring: `src/weezqlite/main.py`
-8. Templates: `src/weezqlite/templates/`
-9. End-to-end smoke test
+- **No server**: sql.js runs SQLite in WASM in the browser. No backend needed.
+- **Hash router**: All navigation uses `window.location.hash`; the URL is shareable
+  and bookmarkable within a session.
+- **Read-only enforcement**: `executeQuery` rejects any non-SELECT SQL via
+  `WRITE_PATTERN` regex before it reaches sql.js.
+- **IndexedDB persistence**: The last-opened database is cached in IndexedDB so it
+  survives page reloads.
+- **Azure Blob Storage**: Optional MSAL-authenticated flow to browse and load nightly
+  backup `.db` files from Azure.
+- **Pagination default**: 50 rows per page; user-selectable (25/50/100/500).
+- **Sortable columns**: ORDER BY is built server-side (in sql.js), column name
+  validated against PRAGMA table_info before use.
+- **PicoCSS for styling**: Semantic HTML + PicoCSS v2 (CDN). Custom CSS is minimal.
 
 ## Running the Project
 
 ```bash
-# Install dependencies
-uv sync
+cd client
 
-# Run tests
-uv run pytest
+# Install dev dependencies (Vitest, Playwright)
+npm install
 
-# Start dev server
-uv run uvicorn weezqlite.main:create_app --factory --reload
+# Run unit tests
+npm test
+
+# Run e2e tests
+npx playwright test
+
+# Serve locally (any static file server, e.g.)
+npx serve .
 ```
 
 ## Notes
 
-- The full implementation plan is in `docs/PLAN.md`.
-- Stack choices are documented in `docs/STACK.md`.
+- Historical Python/FastAPI implementation plan is in `docs/PLAN.md`.
+- Stack choices from the original design are in `docs/STACK.md`.
