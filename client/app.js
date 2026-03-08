@@ -53,6 +53,42 @@ export function escapeHtml(s) {
 export const WRITE_PATTERN =
   /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|REPLACE|TRUNCATE|ATTACH|DETACH)\b/i;
 
+export const TIMESTAMP_TYPE_RE = /\b(TIMESTAMP|DATETIME)\b/i;
+export const DATE_TYPE_RE      = /\bDATE\b/i;
+
+/**
+ * Format a cell value for display, applying locale-aware datetime formatting
+ * when the column type indicates a date/timestamp.  Returns a string.
+ * Returns null unchanged (caller renders it as NULL).
+ */
+export function formatCellValue(value, colType) {
+  if (value === null) return null;
+  const type = colType ?? '';
+  if (TIMESTAMP_TYPE_RE.test(type)) {
+    let d;
+    if (typeof value === 'number') {
+      // Values > 2e10 are almost certainly milliseconds; smaller ones are Unix seconds.
+      d = new Date(value > 2e10 ? value : value * 1000);
+    } else {
+      d = new Date(String(value));
+    }
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      });
+    }
+  } else if (DATE_TYPE_RE.test(type)) {
+    const d = new Date(String(value));
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric',
+      });
+    }
+  }
+  return String(value);
+}
+
 export function listTables(db) {
   const results = db.exec(
     "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -83,7 +119,7 @@ export function getTableSchema(db, table) {
   }));
 }
 
-export function getTableRows(db, table, offset, limit) {
+export function getTableRows(db, table, offset, limit, sortCol = null, sortDir = 'asc') {
   // Verify table exists.
   const check = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
@@ -107,9 +143,17 @@ export function getTableRows(db, table, offset, limit) {
 
   if (limit === 0) return { columns, rows: [], total };
 
+  // Build ORDER BY clause — validate sortCol against known column names.
+  let orderClause = '';
+  if (sortCol !== null && columns.includes(sortCol)) {
+    const safeCol = sortCol.replace(/"/g, '""');
+    const dir = sortDir === 'desc' ? 'DESC' : 'ASC';
+    orderClause = ` ORDER BY "${safeCol}" ${dir}`;
+  }
+
   // Paginated rows.
   const rowsResult = db.exec(
-    `SELECT * FROM "${safeTable}" LIMIT ${Number(limit)} OFFSET ${Number(offset)}`
+    `SELECT * FROM "${safeTable}"${orderClause} LIMIT ${Number(limit)} OFFSET ${Number(offset)}`
   );
   const rows = rowsResult.length
     ? rowsResult[0].values.map(r =>
@@ -466,7 +510,7 @@ export function renderTables() {
     </figure>`;
 }
 
-export function renderTableDetail(tableName, page, pageSize) {
+export function renderTableDetail(tableName, page, pageSize, sortCol = null, sortDir = 'asc') {
   const db = state.currentDb;
 
   let schema;
@@ -477,10 +521,13 @@ export function renderTableDetail(tableName, page, pageSize) {
     return;
   }
 
+  // Map column name → type for formatting decisions.
+  const colTypeMap = Object.fromEntries(schema.map(col => [col.name, col.type]));
+
   const offset = (page - 1) * pageSize;
   let data;
   try {
-    data = getTableRows(db, tableName, offset, pageSize);
+    data = getTableRows(db, tableName, offset, pageSize, sortCol, sortDir);
   } catch (err) {
     getApp().innerHTML = errorArticle(err.message);
     return;
@@ -502,32 +549,50 @@ export function renderTableDetail(tableName, page, pageSize) {
     )
     .join('');
 
+  // Sortable column headers: click cycles unsorted → asc → desc → unsorted.
+  const headerCells = columns.map(col => {
+    const isSorted = sortCol === col;
+    let nextSort, nextDir;
+    if (!isSorted)             { nextSort = col;  nextDir = 'asc'; }
+    else if (sortDir === 'asc'){ nextSort = col;  nextDir = 'desc'; }
+    else                       { nextSort = null; nextDir = 'asc'; }
+
+    const href = _tableUrl(tableName, 1, pageSize, nextSort, nextDir);
+    const cls  = isSorted ? `sortable sort-${sortDir}` : 'sortable';
+    return `<th class="${cls}"><a href="${href}">${escapeHtml(col)}</a></th>`;
+  }).join('');
+
+  // Data rows — apply datetime formatting and attach raw value for copy.
   const dataRows = rows
     .map(
       row => `<tr>${row
-        .map(
-          cell =>
-            `<td>${
-              cell === null
-                ? '<span class="null-val">NULL</span>'
-                : escapeHtml(String(cell))
-            }</td>`
-        )
+        .map((cell, i) => {
+          if (cell === null) return '<td><span class="null-val">NULL</span></td>';
+          const colType = colTypeMap[columns[i]] ?? '';
+          const formatted = formatCellValue(cell, colType);
+          const isDateCol = TIMESTAMP_TYPE_RE.test(colType) || DATE_TYPE_RE.test(colType);
+          const cellClass = isDateCol ? ' class="ts-val"' : '';
+          return `<td${cellClass} data-copy-val="${escapeHtml(String(cell))}">${escapeHtml(formatted)}</td>`;
+        })
         .join('')}</tr>`
     )
     .join('');
 
   const prevBtn =
     page > 1
-      ? `<a href="#table/${encodeURIComponent(tableName)}?page=${page - 1}&page_size=${pageSize}"
+      ? `<a href="${_tableUrl(tableName, page - 1, pageSize, sortCol, sortDir)}"
            role="button" class="outline secondary">← Previous</a>`
       : `<button disabled class="outline secondary">← Previous</button>`;
 
   const nextBtn =
     page < totalPages
-      ? `<a href="#table/${encodeURIComponent(tableName)}?page=${page + 1}&page_size=${pageSize}"
+      ? `<a href="${_tableUrl(tableName, page + 1, pageSize, sortCol, sortDir)}"
            role="button" class="outline secondary">Next →</a>`
       : `<button disabled class="outline secondary">Next →</button>`;
+
+  const pageSizeOptions = [25, 50, 100, 500]
+    .map(n => `<option value="${n}"${n === pageSize ? ' selected' : ''}>${n}</option>`)
+    .join('');
 
   getApp().innerHTML = `
     <hgroup>
@@ -548,9 +613,9 @@ export function renderTableDetail(tableName, page, pageSize) {
     <h2>Data</h2>
     ${
       rows.length
-        ? `<figure>
-            <table>
-              <thead><tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
+        ? `<figure style="overflow-x:auto;">
+            <table id="data-table">
+              <thead><tr>${headerCells}</tr></thead>
               <tbody>${dataRows}</tbody>
             </table>
           </figure>`
@@ -560,9 +625,66 @@ export function renderTableDetail(tableName, page, pageSize) {
     <nav aria-label="Pagination"
          style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
       ${prevBtn}
-      <span>Page ${page} of ${totalPages} &nbsp;·&nbsp; ${pageSize} rows/page</span>
+      <span>Page ${page} of ${totalPages}</span>
+      <label style="margin:0;display:flex;align-items:center;gap:0.4rem;font-size:0.9rem;">
+        Rows:
+        <select class="page-size-select"
+                data-table="${escapeHtml(tableName)}"
+                data-sort="${escapeHtml(sortCol ?? '')}"
+                data-sort-dir="${escapeHtml(sortDir)}">
+          ${pageSizeOptions}
+        </select>
+      </label>
       ${nextBtn}
     </nav>`;
+
+  // Wire up column resizing on the data table after it's in the DOM.
+  const dataTable = document.getElementById('data-table');
+  if (dataTable) _setupColumnResizing(dataTable);
+}
+
+// Build the hash URL for a table-detail page, preserving sort params.
+function _tableUrl(tableName, page, pageSize, sortCol, sortDir) {
+  let url = `#table/${encodeURIComponent(tableName)}?page=${page}&page_size=${pageSize}`;
+  if (sortCol) url += `&sort=${encodeURIComponent(sortCol)}&sort_dir=${sortDir}`;
+  return url;
+}
+
+// Attach drag-to-resize handles to every <th> in a table.
+function _setupColumnResizing(tableEl) {
+  const headers = Array.from(tableEl.querySelectorAll('thead th'));
+  // Capture rendered widths, then lock the layout so dragging is predictable.
+  const widths = headers.map(th => th.getBoundingClientRect().width);
+  widths.forEach((w, i) => { headers[i].style.width = w + 'px'; });
+  tableEl.style.tableLayout = 'fixed';
+
+  headers.forEach(th => {
+    const handle = document.createElement('div');
+    handle.className = 'col-resize-handle';
+    th.appendChild(handle);
+
+    handle.addEventListener('mousedown', e => {
+      const startX = e.clientX;
+      const startWidth = th.getBoundingClientRect().width;
+      handle.classList.add('resizing');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      const onMouseMove = ev => {
+        th.style.width = Math.max(40, startWidth + ev.clientX - startX) + 'px';
+      };
+      const onMouseUp = () => {
+        handle.classList.remove('resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+    });
+  });
 }
 
 export function renderQuery(sql = '', result = null, error = null) {
@@ -781,7 +903,9 @@ export async function render() {
             1000,
             Math.max(1, parseInt(params.page_size ?? String(PAGE_SIZE_DEFAULT), 10))
           );
-          renderTableDetail(params.name, page, pageSize);
+          const sortCol = params.sort ?? null;
+          const sortDir = params.sort_dir === 'desc' ? 'desc' : 'asc';
+          renderTableDetail(params.name, page, pageSize, sortCol, sortDir);
           break;
         }
         case 'query':
@@ -834,6 +958,14 @@ export async function bootstrap() {
   }
 
   window.addEventListener('hashchange', render);
+
+  // Page-size selector — navigate to page 1 with the chosen page size.
+  document.addEventListener('change', e => {
+    if (!e.target.classList.contains('page-size-select')) return;
+    const { table, sort, sortDir } = e.target.dataset;
+    const newSize = parseInt(e.target.value, 10);
+    window.location.hash = _tableUrl(table, 1, newSize, sort || null, sortDir || 'asc');
+  });
 
   // Delegated submit handler (form-open and form-query are rendered dynamically).
   document.addEventListener('submit', async e => {
@@ -915,6 +1047,15 @@ export async function bootstrap() {
       }
       renderAzureBackups({ signedIn: false });
       renderNav();
+
+    // ── Copy cell value to clipboard ─────────────────────────────────────────
+    } else if (e.target.closest('td[data-copy-val]')) {
+      const td = e.target.closest('td[data-copy-val]');
+      const val = td.dataset.copyVal;
+      navigator.clipboard?.writeText(val).then(() => {
+        td.classList.add('copied');
+        setTimeout(() => td.classList.remove('copied'), 500);
+      });
 
     // ── Load a backup from Azure ─────────────────────────────────────────────
     } else if (e.target.classList.contains('btn-load-backup')) {
