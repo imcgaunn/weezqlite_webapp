@@ -16,11 +16,11 @@ const IDB_STORE = 'databases';
 const IDB_KEY = 'lastDb';
 const IDB_VERSION = 1;
 
-const STORAGE_SCOPE = 'https://storage.azure.com/user_impersonation';
+const STORAGE_SCOPE = 'https://storage.azure.com/.default';
 const STORAGE_API_VERSION = '2020-10-02';
 // Matches blob paths of the form: artifacts/backup/YYYY/MM/DD/meemawmode.db
 const BACKUP_BLOB_PATTERN =
-  /^artifacts\/backup\/(\d{4})\/(\d{2})\/(\d{2})\/meemawmode\.db$/;
+  /^backup\/(\d{4})\/(\d{2})\/(\d{2})\/meemawmode\.db$/;
 
 // =============================================================================
 // 2.  Module state (browser session)
@@ -263,7 +263,7 @@ export async function initMsal(config = AZURE_CONFIG, msalLib = null) {
 }
 
 export async function signIn() {
-  const result = await state.msalApp.loginPopup({ scopes: [STORAGE_SCOPE] });
+  const result = await state.msalApp.loginPopup({ scopes: ['openid', 'profile'] });
   state.azureAccount = result.account;
   return result.account;
 }

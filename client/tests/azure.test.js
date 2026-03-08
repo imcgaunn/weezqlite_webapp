@@ -17,7 +17,7 @@ const TEST_CONFIG = {
   redirectUri: 'http://localhost:8080',
   storageAccount: 'testaccount',
   container: 'testcontainer',
-  backupPrefix: 'artifacts/backup/',
+  backupPrefix: 'backup/',
 };
 
 // ─── Shared setup ─────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ describe('signIn', () => {
     expect(state.azureAccount).toBe(mockAccount);
     expect(state.msalApp.loginPopup).toHaveBeenCalledWith(
       expect.objectContaining({
-        scopes: expect.arrayContaining(['https://storage.azure.com/user_impersonation']),
+        scopes: expect.arrayContaining(['openid', 'profile']),
       })
     );
   });
@@ -104,7 +104,7 @@ describe('getStorageToken', () => {
     expect(token).toBe('silent-token-xyz');
     expect(state.msalApp.acquireTokenSilent).toHaveBeenCalledWith(
       expect.objectContaining({
-        scopes: expect.arrayContaining(['https://storage.azure.com/user_impersonation']),
+        scopes: expect.arrayContaining(['https://storage.azure.com/.default']),
         account: mockAccount,
       })
     );
@@ -142,10 +142,10 @@ describe('getStorageToken', () => {
 const SAMPLE_LIST_XML = `<?xml version="1.0" encoding="utf-8"?>
 <EnumerationResults ServiceEndpoint="https://testaccount.blob.core.windows.net/">
   <Blobs>
-    <Blob><Name>artifacts/backup/2026/03/08/meemawmode.db</Name></Blob>
-    <Blob><Name>artifacts/backup/2026/03/07/meemawmode.db</Name></Blob>
-    <Blob><Name>artifacts/backup/2026/02/28/meemawmode.db</Name></Blob>
-    <Blob><Name>artifacts/backup/2026/03/01/some_other_file.db</Name></Blob>
+    <Blob><Name>backup/2026/03/08/meemawmode.db</Name></Blob>
+    <Blob><Name>backup/2026/03/07/meemawmode.db</Name></Blob>
+    <Blob><Name>backup/2026/02/28/meemawmode.db</Name></Blob>
+    <Blob><Name>backup/2026/03/01/some_other_file.db</Name></Blob>
   </Blobs>
 </EnumerationResults>`;
 
@@ -188,7 +188,7 @@ describe('listBackups', () => {
 
     const backups = await listBackups('test-token', TEST_CONFIG);
 
-    expect(backups[0].blobPath).toBe('artifacts/backup/2026/03/08/meemawmode.db');
+    expect(backups[0].blobPath).toBe('backup/2026/03/08/meemawmode.db');
   });
 
   it('returns empty array when container has no matching blobs', async () => {
@@ -231,7 +231,7 @@ describe('listBackups', () => {
 
 // ─── downloadBackup ───────────────────────────────────────────────────────────
 
-const BLOB_PATH = 'artifacts/backup/2026/03/08/meemawmode.db';
+const BLOB_PATH = 'backup/2026/03/08/meemawmode.db';
 
 describe('downloadBackup', () => {
   it('returns a Uint8Array of the blob bytes on success', async () => {
@@ -326,8 +326,8 @@ describe('renderAzureBackups', () => {
 
   it('renders a table row for each backup', () => {
     const backups = [
-      { year: '2026', month: '03', day: '08', blobPath: 'artifacts/backup/2026/03/08/meemawmode.db' },
-      { year: '2026', month: '03', day: '07', blobPath: 'artifacts/backup/2026/03/07/meemawmode.db' },
+      { year: '2026', month: '03', day: '08', blobPath: 'backup/2026/03/08/meemawmode.db' },
+      { year: '2026', month: '03', day: '07', blobPath: 'backup/2026/03/07/meemawmode.db' },
     ];
     renderAzureBackups({ signedIn: true }, backups, false, null);
     expect(document.querySelectorAll('tbody tr').length).toBe(2);
@@ -335,7 +335,7 @@ describe('renderAzureBackups', () => {
 
   it('shows the formatted date in each backup row', () => {
     const backups = [
-      { year: '2026', month: '03', day: '08', blobPath: 'artifacts/backup/2026/03/08/meemawmode.db' },
+      { year: '2026', month: '03', day: '08', blobPath: 'backup/2026/03/08/meemawmode.db' },
     ];
     renderAzureBackups({ signedIn: true }, backups, false, null);
     expect(document.getElementById('app').innerHTML).toContain('2026-03-08');
@@ -343,12 +343,12 @@ describe('renderAzureBackups', () => {
 
   it('each row has a load button with the blobPath as a data attribute', () => {
     const backups = [
-      { year: '2026', month: '03', day: '08', blobPath: 'artifacts/backup/2026/03/08/meemawmode.db' },
+      { year: '2026', month: '03', day: '08', blobPath: 'backup/2026/03/08/meemawmode.db' },
     ];
     renderAzureBackups({ signedIn: true }, backups, false, null);
     const btn = document.querySelector('.btn-load-backup');
     expect(btn).not.toBeNull();
-    expect(btn.dataset.blobPath).toBe('artifacts/backup/2026/03/08/meemawmode.db');
+    expect(btn.dataset.blobPath).toBe('backup/2026/03/08/meemawmode.db');
   });
 
   it('renders a sign-out button when signed in', () => {

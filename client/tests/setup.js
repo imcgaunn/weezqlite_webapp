@@ -9,7 +9,7 @@ vi.mock('../config.js', () => ({
     redirectUri: 'http://localhost:8080',
     storageAccount: 'testaccount',
     container: 'testcontainer',
-    backupPrefix: 'artifacts/backup/',
+    backupPrefix: 'backup/',
   },
 }));
 
