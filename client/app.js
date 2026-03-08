@@ -241,13 +241,14 @@ export async function clearSavedDb() {
 
 export async function initMsal(config = AZURE_CONFIG, msalLib = null) {
   if (state.msalApp) return;
-  const lib = msalLib ?? globalThis.msal;
-  if (!lib) throw new Error('MSAL not loaded — missing CDN script?');
   if (!config?.clientId) {
     throw new Error(
       'Azure config not set — copy config.example.js to config.js and set your clientId'
     );
   }
+  // Allow test injection via msalLib; otherwise load the ESM build from CDN.
+  const lib = msalLib ??
+    await import('https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/+esm');
 
   const app = new lib.PublicClientApplication({
     auth: {
@@ -879,6 +880,15 @@ export async function bootstrap() {
 
     // ── Azure sign-in ────────────────────────────────────────────────────────
     } else if (e.target.id === 'btn-azure-signin') {
+      if (!state.msalApp) {
+        try {
+          await initMsal();
+        } catch (err) {
+          renderAzureBackups({ signedIn: false }, [], false, `Cannot initialise Azure auth: ${err.message}`);
+          renderNav();
+          return;
+        }
+      }
       try {
         await signIn();
         renderAzureBackups({ signedIn: true }, [], true, null);
@@ -887,7 +897,12 @@ export async function bootstrap() {
         const backups = await listBackups(token);
         renderAzureBackups({ signedIn: true }, backups, false, null);
       } catch (err) {
-        renderAzureBackups({ signedIn: false });
+        // User-cancelled popup produces a specific message; don't treat as an error.
+        if (!err.message?.includes('user_cancelled') && !err.message?.includes('User cancelled')) {
+          renderAzureBackups({ signedIn: false }, [], false, `Sign-in failed: ${err.message}`);
+        } else {
+          renderAzureBackups({ signedIn: false });
+        }
       }
       renderNav();
 
