@@ -75,6 +75,15 @@ describe('renderNav', () => {
     expect(nav.innerHTML).not.toContain('#query');
     expect(nav.innerHTML).toContain('#home');
   });
+
+  it('always shows Azure Backups link regardless of DB state', () => {
+    renderNav();
+    expect(document.getElementById('main-nav-links').innerHTML).toContain('#backups');
+    state.currentDb = null;
+    state.currentDbName = null;
+    renderNav();
+    expect(document.getElementById('main-nav-links').innerHTML).toContain('#backups');
+  });
 });
 
 // ─── renderHome ───────────────────────────────────────────────────────────────

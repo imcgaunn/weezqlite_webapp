@@ -43,6 +43,10 @@ describe('parseHash', () => {
     expect(result.view).toBe('query');
     expect(result.params.some).toBe('value');
   });
+
+  it('"#backups" → backups view with empty params', () => {
+    expect(parseHash('#backups')).toEqual({ view: 'backups', params: {} });
+  });
 });
 
 describe('navigate', () => {

@@ -3,6 +3,8 @@
 // All state stays in the browser; SQLite runs via sql.js (WASM).
 // =============================================================================
 
+import { AZURE_CONFIG } from './config.js';
+
 // =============================================================================
 // 1.  Constants
 // =============================================================================
@@ -14,14 +16,22 @@ const IDB_STORE = 'databases';
 const IDB_KEY = 'lastDb';
 const IDB_VERSION = 1;
 
+const STORAGE_SCOPE = 'https://storage.azure.com/user_impersonation';
+const STORAGE_API_VERSION = '2020-10-02';
+// Matches blob paths of the form: artifacts/backup/YYYY/MM/DD/meemawmode.db
+const BACKUP_BLOB_PATTERN =
+  /^artifacts\/backup\/(\d{4})\/(\d{2})\/(\d{2})\/meemawmode\.db$/;
+
 // =============================================================================
 // 2.  Module state (browser session)
 // =============================================================================
 
 export const state = {
-  SQL: null,        // sql.js module, initialised once in bootstrap()
-  currentDb: null,  // sql.js Database instance
+  SQL: null,          // sql.js module, initialised once in bootstrap()
+  currentDb: null,    // sql.js Database instance
   currentDbName: null,
+  msalApp: null,      // msal.PublicClientApplication instance
+  azureAccount: null, // signed-in MSAL account
 };
 
 // =============================================================================
@@ -226,7 +236,123 @@ export async function clearSavedDb() {
 }
 
 // =============================================================================
-// 7.  View helpers
+// 7.  Azure AD auth  (MSAL.js)
+// =============================================================================
+
+export async function initMsal(config = AZURE_CONFIG, msalLib = null) {
+  if (state.msalApp) return;
+  const lib = msalLib ?? globalThis.msal;
+  if (!lib) throw new Error('MSAL not loaded — missing CDN script?');
+  if (!config?.clientId) {
+    throw new Error(
+      'Azure config not set — copy config.example.js to config.js and set your clientId'
+    );
+  }
+
+  const app = new lib.PublicClientApplication({
+    auth: {
+      clientId: config.clientId,
+      authority: config.authority,
+      redirectUri: config.redirectUri,
+    },
+    cache: { cacheLocation: 'localStorage' },
+  });
+  await app.initialize();
+  state.msalApp = app;
+}
+
+export async function signIn() {
+  const result = await state.msalApp.loginPopup({ scopes: [STORAGE_SCOPE] });
+  state.azureAccount = result.account;
+  return result.account;
+}
+
+export async function signOut() {
+  await state.msalApp.logoutPopup({ account: state.azureAccount });
+  state.azureAccount = null;
+}
+
+export async function getStorageToken() {
+  const request = { scopes: [STORAGE_SCOPE], account: state.azureAccount };
+  try {
+    const result = await state.msalApp.acquireTokenSilent(request);
+    return result.accessToken;
+  } catch (err) {
+    if (err.name === 'InteractionRequiredAuthError') {
+      const result = await state.msalApp.acquireTokenPopup(request);
+      return result.accessToken;
+    }
+    throw err;
+  }
+}
+
+// =============================================================================
+// 8.  Azure Blob Storage helpers
+// =============================================================================
+
+export async function listBackups(token, config = AZURE_CONFIG) {
+  const { storageAccount, container, backupPrefix } = config;
+  const url =
+    `https://${storageAccount}.blob.core.windows.net/${container}` +
+    `?restype=container&comp=list&prefix=${encodeURIComponent(backupPrefix)}`;
+
+  const resp = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'x-ms-version': STORAGE_API_VERSION,
+    },
+  });
+
+  if (!resp.ok) {
+    throw new Error(`Failed to list backups: ${resp.status} ${resp.statusText}`);
+  }
+
+  const xml = await resp.text();
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+
+  const backups = [];
+  for (const el of doc.querySelectorAll('Blob Name')) {
+    const match = el.textContent.match(BACKUP_BLOB_PATTERN);
+    if (match) {
+      backups.push({
+        year: match[1],
+        month: match[2],
+        day: match[3],
+        blobPath: el.textContent,
+      });
+    }
+  }
+
+  // Newest-first
+  backups.sort((a, b) => {
+    const da = `${a.year}${a.month}${a.day}`;
+    const db = `${b.year}${b.month}${b.day}`;
+    return db.localeCompare(da);
+  });
+
+  return backups;
+}
+
+export async function downloadBackup(token, blobPath, config = AZURE_CONFIG) {
+  const { storageAccount, container } = config;
+  const url = `https://${storageAccount}.blob.core.windows.net/${container}/${blobPath}`;
+
+  const resp = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'x-ms-version': STORAGE_API_VERSION,
+    },
+  });
+
+  if (!resp.ok) {
+    throw new Error(`Failed to download backup: ${resp.status} ${resp.statusText}`);
+  }
+
+  return new Uint8Array(await resp.arrayBuffer());
+}
+
+// =============================================================================
+// 9.  View helpers
 // =============================================================================
 
 function getApp() {
@@ -240,25 +366,27 @@ function errorArticle(message) {
 }
 
 // =============================================================================
-// 8.  Nav renderer
+// 10. Nav renderer
 // =============================================================================
 
 export function renderNav() {
   const nav = document.getElementById('main-nav-links');
   if (!nav) return;
+  const azureLink = `<li><a href="#backups">Azure Backups</a></li>`;
   if (state.currentDb) {
     nav.innerHTML = `
       <li><a href="#tables">Tables</a></li>
       <li><a href="#query">Query</a></li>
       <li><span class="db-label">${escapeHtml(state.currentDbName ?? '')}</span></li>
-      <li><a href="#home">Change DB</a></li>`;
+      <li><a href="#home">Change DB</a></li>
+      ${azureLink}`;
   } else {
-    nav.innerHTML = `<li><a href="#home">Open Database</a></li>`;
+    nav.innerHTML = `<li><a href="#home">Open Database</a></li>${azureLink}`;
   }
 }
 
 // =============================================================================
-// 9.  View renderers
+// 11. View renderers
 // =============================================================================
 
 export function renderHome(savedDb = null) {
@@ -491,8 +619,85 @@ export function renderQuery(sql = '', result = null, error = null) {
     ${resultHtml}`;
 }
 
+export function renderAzureBackups(authState, backups = [], loading = false, error = null) {
+  const app = getApp();
+
+  if (error) {
+    app.innerHTML = `
+      <hgroup>
+        <h1>Azure Backups</h1>
+        <p>Browse nightly meemawmode backups</p>
+      </hgroup>
+      ${errorArticle(error)}`;
+    return;
+  }
+
+  if (!authState.signedIn) {
+    app.innerHTML = `
+      <hgroup>
+        <h1>Azure Backups</h1>
+        <p>Browse nightly meemawmode backups stored in Azure Blob Storage.</p>
+      </hgroup>
+      <article>
+        <p>Sign in with your Microsoft account to browse available backups.</p>
+        <button id="btn-azure-signin">Sign in with Microsoft</button>
+      </article>`;
+    return;
+  }
+
+  if (loading) {
+    app.innerHTML = `
+      <hgroup>
+        <h1>Azure Backups</h1>
+        <p>Browse nightly meemawmode backups</p>
+      </hgroup>
+      <p aria-busy="true">Loading backups…</p>`;
+    return;
+  }
+
+  const signOutBtn = `<button id="btn-azure-signout" class="outline secondary"
+    style="margin-top:1rem;">Sign out</button>`;
+
+  if (!backups.length) {
+    app.innerHTML = `
+      <hgroup>
+        <h1>Azure Backups</h1>
+        <p>Browse nightly meemawmode backups</p>
+      </hgroup>
+      <p>No backups found.</p>
+      ${signOutBtn}`;
+    return;
+  }
+
+  const rows = backups
+    .map(
+      b => `<tr>
+        <td>${escapeHtml(b.year)}-${escapeHtml(b.month)}-${escapeHtml(b.day)}</td>
+        <td>
+          <button class="outline btn-load-backup"
+                  data-blob-path="${escapeHtml(b.blobPath)}"
+                  style="padding:0.3rem 0.75rem;font-size:0.85rem;">Load</button>
+        </td>
+      </tr>`
+    )
+    .join('');
+
+  app.innerHTML = `
+    <hgroup>
+      <h1>Azure Backups</h1>
+      <p>${backups.length} backup${backups.length !== 1 ? 's' : ''} available</p>
+    </hgroup>
+    <figure>
+      <table>
+        <thead><tr><th>Date</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </figure>
+    ${signOutBtn}`;
+}
+
 // =============================================================================
-// 10. sql.js initialisation (browser-only; tests inject DB directly via state)
+// 12. sql.js initialisation (browser-only; tests inject DB directly via state)
 // =============================================================================
 
 export async function initSql(factory = null) {
@@ -508,7 +713,7 @@ export function openDatabase(bytes) {
 }
 
 // =============================================================================
-// 11. Event handlers
+// 13. Event handlers
 // =============================================================================
 
 async function handleFileSelect(file) {
@@ -554,7 +759,7 @@ async function _showHomeError(message) {
 }
 
 // =============================================================================
-// 12. Main render dispatcher
+// 14. Main render dispatcher
 // =============================================================================
 
 export async function render() {
@@ -581,6 +786,21 @@ export async function render() {
         case 'query':
           renderQuery();
           break;
+        case 'backups': {
+          if (!state.azureAccount) {
+            renderAzureBackups({ signedIn: false });
+          } else {
+            renderAzureBackups({ signedIn: true }, [], true, null);
+            try {
+              const token = await getStorageToken();
+              const backups = await listBackups(token);
+              renderAzureBackups({ signedIn: true }, backups, false, null);
+            } catch (err) {
+              renderAzureBackups({ signedIn: true }, [], false, err.message);
+            }
+          }
+          break;
+        }
         default: {
           const savedDb = await loadSavedDb().catch(() => null);
           renderHome(savedDb);
@@ -596,11 +816,21 @@ export async function render() {
 }
 
 // =============================================================================
-// 13. Bootstrap  (runs once in the browser; skipped in tests via import.meta.env)
+// 15. Bootstrap  (runs once in the browser; skipped in tests via import.meta.env)
 // =============================================================================
 
 export async function bootstrap() {
   await initSql();
+
+  // Initialise MSAL; non-fatal if CDN script is absent or config is incomplete.
+  try {
+    await initMsal();
+    // Restore any account cached from a previous session.
+    const accounts = state.msalApp.getAllAccounts?.() ?? [];
+    if (accounts.length > 0) state.azureAccount = accounts[0];
+  } catch {
+    // Azure auth unavailable — file-upload flow still works.
+  }
 
   window.addEventListener('hashchange', render);
 
@@ -626,8 +856,9 @@ export async function bootstrap() {
     }
   });
 
-  // Delegated click handler for restore / clear buttons.
+  // Delegated click handler.
   document.addEventListener('click', async e => {
+    // ── local file restore / clear ──────────────────────────────────────────
     if (e.target.id === 'btn-restore') {
       const saved = await loadSavedDb().catch(() => null);
       if (!saved) return;
@@ -640,10 +871,58 @@ export async function bootstrap() {
       } catch (err) {
         _showHomeError(`Could not restore database: ${err.message}`);
       }
+
     } else if (e.target.id === 'btn-clear-saved') {
       await clearSavedDb().catch(() => null);
       renderHome(null);
       renderNav();
+
+    // ── Azure sign-in ────────────────────────────────────────────────────────
+    } else if (e.target.id === 'btn-azure-signin') {
+      try {
+        await signIn();
+        renderAzureBackups({ signedIn: true }, [], true, null);
+        renderNav();
+        const token = await getStorageToken();
+        const backups = await listBackups(token);
+        renderAzureBackups({ signedIn: true }, backups, false, null);
+      } catch (err) {
+        renderAzureBackups({ signedIn: false });
+      }
+      renderNav();
+
+    // ── Azure sign-out ───────────────────────────────────────────────────────
+    } else if (e.target.id === 'btn-azure-signout') {
+      try {
+        await signOut();
+      } catch {
+        state.azureAccount = null;
+      }
+      renderAzureBackups({ signedIn: false });
+      renderNav();
+
+    // ── Load a backup from Azure ─────────────────────────────────────────────
+    } else if (e.target.classList.contains('btn-load-backup')) {
+      const blobPath = e.target.dataset.blobPath;
+      if (!blobPath) return;
+      e.target.setAttribute('aria-busy', 'true');
+      e.target.disabled = true;
+      try {
+        const token = await getStorageToken();
+        const bytes = await downloadBackup(token, blobPath);
+        const db = openDatabase(bytes);
+        if (state.currentDb) state.currentDb.close();
+        state.currentDb = db;
+        // Derive a friendly name from the blob path date components.
+        const m = blobPath.match(/(\d{4})\/(\d{2})\/(\d{2})\/meemawmode\.db$/);
+        state.currentDbName = m
+          ? `meemawmode-${m[1]}-${m[2]}-${m[3]}.db`
+          : 'meemawmode.db';
+        navigate('tables');
+      } catch (err) {
+        renderAzureBackups({ signedIn: true }, [], false, `Failed to load backup: ${err.message}`);
+        renderNav();
+      }
     }
   });
 
